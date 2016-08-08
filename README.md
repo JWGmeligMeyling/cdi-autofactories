@@ -1,88 +1,80 @@
-# SoftwareMill Common project
+# CDI extensions
 
-Most of the modules are usable stand-alone and do not require other modules. Simply include the jar in your
-project and you're ready to use it. See the individual module READMEs for more information.
+This is a WELD 2.0 port of the SoftwareMill Common CDI auto factories.
+Original repository: https://github.com/softwaremill/softwaremill-common
+*Work in progress*
 
-Jars and sources are available in our Maven repositories:
+## Autofactories, or assisted inject implementation for CDI
 
-    <repository>
-        <id>softwaremill-snapshots</id>
-        <name>SoftwareMill Snapshots</name>
-        <url>https://nexus.softwaremill.com/content/repositories/snapshots</url>
-    </repository>
-    <repository>
-        <id>softwaremill-releases</id>
-        <name>SoftwareMill Releases</name>
-        <url>https://nexus.softwaremill.com/content/repositories/releases</url>
-    </repository>
+Assisted inject originates from Guice: http://code.google.com/p/google-guice/wiki/AssistedInject
 
-To use SoftwareMill Common in a project define a parent section in the main pom of the project:
+Using autofactories can save you some time writing simple factories which inject beans and pass them in the
+constructor to create the target bean.
 
-    <parent>
-        <groupId>com.softwaremill.common</groupId>
-        <artifactId>softwaremill-parent</artifactId>
-        <version>[VERSION]</version>
-    </parent>
+For example if you have:
 
-where [VERSION] is the version you want to use in your project.
+    interface PriceCalculator {
+        int getPriceAfterDiscounts();
 
-**Important Note:** Since version 74 SoftwareMill Common uses *com.softwaremill* package names instead of *pl.softwaremill* that were present in version 73 and earlier.
+        interface Factory {
+            PriceCalculator create(Product product);
+        }
+    }
 
-# Modules overview
+and an implementation (`PriceCalculatorImpl`) which calculates the discount basing on an instance of a Discounts bean,
+instead of writing an implementation of the Factory yourself, you can just do:
 
-## [CDI extensions](/softwaremill-cdi/)
+    @CreatedWith(PriceCalculator.Factory.class)
+    public class PriceCalculatorImpl implements PriceCalculator {
+        private final Discounts discounts;
+        private final Product product;
 
-* Transaction interceptors
-* Stackable security interceptors
-* Implementation of assisted inject in Weld (autofactories)
-* Object-services (polymorphic extension methods)
-* Static bean injection
+        @Inject
+        public PriceCalculatorImpl(Discounts discounts, @FactoryParameter Product product) {
+            this.discounts = discounts;
+            this.product = product;
+        }
 
-## [CDI+JSF2 integration utilities](/softwaremill-faces/)
+        int getPriceAfterDiscounts() {
+            return product.getPrice() - discounts.getNormalDiscount();
+        }
+    }
 
-* Transaction phase listeners ("open session in view")
-* Security phase listeners
-* Navigation handlers
-* i18n, messaging, validation utilities
+Note the usage of the annotations:
+- `@CreatedWith` specifies the factory interface, for which an implementation will be created. The interface
+should have only one method (later referred to as the factory method)
+- `@FactoryParameter` specifies that the annotated constructor parameter corresponds to a parameter of the same class
+in the factory method
+- `@Inject` specifies that other parameters should be injected from the context
 
-## [Configuration reader](/softwaremill-conf/)
+You can then use the factory as any other bean:
 
-Reads key-value configuration files either from JBoss's conf directory (which have priority) or from the classpath. 
+    public class Test {
+        @Inject
+        private PriceCalculator.Factory priceCalculatorFactory;
 
-## [Amazon AWS Utilities](/softwaremill-sqs/)
+        public void test() {
+            assertThat(priceCalculatorFactory.create(new Product(100)).getPriceAfterDiscounts()).isEqualTo(90);
+        }
+    }
 
-## [Softwaremill Parent](/softwaremill-parent/)
+Alternatively, if you don't want to mix dependencies and factory parameters in the constructor, you can use field
+or setter injection:
 
-Our BOM.
+    @CreatedWith(PriceCalculator.Factory.class)
+    public class PriceCalculatorImpl implements PriceCalculator {
+        @Inject
+        private Discounts discounts;
 
-## Testing utilities
+        private final Product product;
 
-### [Test-with-DB framework using Arquillian](/softwaremill-test/softwaremill-test-db)
+        public PriceCalculatorImpl(Product product) {
+            this.product = product;
+        }
 
-Lets you run tests that use a database.
+        int getPriceAfterDiscounts() {
+            return product.getPrice() - discounts.getNormalDiscount();
+        }
+    }
 
-### [Selenium+JBoss UI testing utilities](/softwaremill-test/softwaremill-test-ui-web/)
-
-### [FEST Assert for joda time classes](/softwaremill-test/softwaremill-test-util/)
-
-### [Test server](/softwaremill-test/softwaremill-test-server/)
-
-For testing of requests sent to server
-
-## [Java utilities](/softwaremill-util/)
-
-## [Backup utilities](/softwaremill-backup/)
-
-Scripts and java classes to backup SimpleDB domains and upload them to S3.
-
-## [Debug utilities](/softwaremill-debug/)
-
-A timing interceptor + web filter + portable extension for profiling CDI beans.
-
-## [Paypal](/softwaremill-paypal/)
-
-Paypal utilities for handling paypal requests (IPN) and generating paypal pay buttons (custom cart).
-
----
-
-Licensed under the Apache2 license. [Softwaremill 2010-2012](http://softwaremill.com/).
+The `@Inject` annotation on the constructor and the `@FactoryParameter` annotations aren't needed in this case.
